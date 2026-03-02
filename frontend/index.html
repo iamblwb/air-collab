@@ -150,8 +150,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<!-- Cannon-es physics -->
-<script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
+<!-- no external physics lib needed -->
 
 <script>
 // ─── Config ──────────────────────────────────────────────────────────────
@@ -221,35 +220,70 @@ function initThree() {
   fillLight.position.set(-3, -2, 3);
   scene.add(fillLight);
 
-  // Physics world
-  window.physicsWorld = new CANNON.World();
-  physicsWorld.gravity.set(0, -2.5, 0);
-  physicsWorld.broadphase = new CANNON.SAPBroadphase(physicsWorld);
-  physicsWorld.allowSleep = true;
-
   animate();
+}
+
+// ── Pure JS physics ─────────────────────────────────────────────────────
+const physicsObjects = []; // { mesh, vel, radius }
+const GRAVITY   = -0.006;
+const DAMPING   = 0.97;
+const FLOOR_Y   = -4.0;
+const RESTITUTION = 0.55; // bounciness
+
+function physicsStep() {
+  const n = physicsObjects.length;
+  for (let i = 0; i < n; i++) {
+    const o = physicsObjects[i];
+    // Gravity
+    o.vel.y += GRAVITY;
+    // Move
+    o.mesh.position.addScaledVector(o.vel, 1);
+    // Floor
+    if (o.mesh.position.y - o.radius < FLOOR_Y) {
+      o.mesh.position.y = FLOOR_Y + o.radius;
+      o.vel.y = Math.abs(o.vel.y) * RESTITUTION;
+      o.vel.x *= DAMPING;
+      o.vel.z *= DAMPING;
+    }
+    // Pair collision
+    for (let j = i + 1; j < n; j++) {
+      const b = physicsObjects[j];
+      const diff = o.mesh.position.clone().sub(b.mesh.position);
+      const dist = diff.length();
+      const minD = o.radius + b.radius;
+      if (dist < minD && dist > 0.001) {
+        // Push apart
+        const push = (minD - dist) / 2;
+        const norm = diff.normalize();
+        o.mesh.position.addScaledVector(norm,  push);
+        b.mesh.position.addScaledVector(norm, -push);
+        // Elastic impulse
+        const relVel = o.vel.clone().sub(b.vel);
+        const dot = relVel.dot(norm);
+        if (dot < 0) {
+          const impulse = norm.clone().multiplyScalar(dot * RESTITUTION);
+          o.vel.sub(impulse);
+          b.vel.add(impulse);
+          // Collision spark
+          const mid = o.mesh.position.clone().add(b.mesh.position).multiplyScalar(0.5);
+          spawnParticles(mid, 12, o.mesh.material.color);
+        }
+      }
+    }
+  }
 }
 
 function animate() {
   requestAnimationFrame(animate);
-  // Rotate all objects slightly for liveliness
+  // Spin in place
   sceneObjects.forEach(o => {
     if (o.mesh && o.mesh.userData.spin) {
       o.mesh.rotation.y += 0.005;
       o.mesh.rotation.x += 0.002;
     }
   });
-  // Physics step
-  if (window.physicsWorld) {
-    physicsWorld.fixedStep(1/60);
-    sceneObjects.forEach(({ mesh }) => {
-      const body = mesh.userData.physicsBody;
-      if (body && body.mass > 0) {
-        mesh.position.set(body.position.x, body.position.y, body.position.z);
-        // 保持自轉 spin（不從 physics 取 quaternion，讓 spin 繼續好看）
-      }
-    });
-  }
+  // Physics
+  physicsStep();
   if (renderer) renderer.render(scene, threeCamera);
 }
 
@@ -588,31 +622,18 @@ function spawnObject(type, center, points3D) {
   animateIn(mesh);
   spawnParticles(meshCenter, 35, material.color);
 
-  // Compute bounding sphere for physics
+  // Register in pure-JS physics
   geometry.computeBoundingSphere();
   const radius = Math.max(0.12, geometry.boundingSphere ? geometry.boundingSphere.radius * 0.75 : 0.3);
-
-  // Physics body
-  if (window.physicsWorld) {
-    const body = new CANNON.Body({
-      mass: 1.0,
-      shape: new CANNON.Sphere(radius),
-      position: new CANNON.Vec3(mesh.position.x, mesh.position.y, mesh.position.z),
-      linearDamping: 0.3,
-      angularDamping: 0.8,
-    });
-    physicsWorld.addBody(body);
-    mesh.userData.physicsBody = body;
-
-    // 碰撞時噴火花
-    body.addEventListener('collide', (e) => {
-      const cp = e.contact.getImpactVelocityAlongNormal();
-      if (Math.abs(cp) > 0.5) {
-        const pos = new THREE.Vector3(body.position.x, body.position.y, body.position.z);
-        spawnParticles(pos, 15, mesh.material.color);
-      }
-    });
-  }
+  physicsObjects.push({
+    mesh,
+    radius,
+    vel: new THREE.Vector3(
+      (Math.random() - 0.5) * 0.015,
+      (Math.random() - 0.5) * 0.01,
+      0
+    ),
+  });
 
   return mesh;
 }
@@ -655,6 +676,7 @@ function finalizeShape(t) {
 function clearScene() {
   sceneObjects.forEach(o => scene.remove(o.mesh));
   sceneObjects = [];
+  physicsObjects.length = 0;
   clearTrace();
   trail = [];
   setStatus('🗑️ 場景已清除', '80,30,0');
@@ -856,13 +878,6 @@ document.getElementById('start-btn').addEventListener('click', async () => {
     setStatus('⏳ 載入手勢模型…');
     initThree();
     // Ground plane（不可見）
-    const groundBody = new CANNON.Body({
-      mass: 0,
-      shape: new CANNON.Plane(),
-      position: new CANNON.Vec3(0, -4, 0),
-    });
-    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-    physicsWorld.addBody(groundBody);
     resizeCanvases();
     connectWS();
     initMediaPipe();
