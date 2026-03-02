@@ -1,0 +1,37 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+
+            # Pull latest code
+            cd /home/albert/air-collab
+            git pull origin main
+
+            # Install/update backend dependencies
+            /home/albert/.local/bin/uv pip install \
+              --python /home/albert/.local/blender-env311/bin/python3.11 \
+              -r backend/requirements.txt
+
+            # Restart backend service
+            systemctl --user restart air-collab.service
+
+            # Copy frontend to web root
+            cp frontend/index.html /var/www/air.iamblwb.com/index.html
+
+            echo "✅ Deployed successfully"

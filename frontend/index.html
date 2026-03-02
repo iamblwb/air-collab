@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>air.iamblwb.com — Gesture 3D Collab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050510;
+    color: #e0e0ff;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #canvas-3d {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+
+  #draw-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 10;
+    cursor: crosshair;
+  }
+
+  #ui {
+    position: fixed;
+    top: 20px; left: 20px;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .title {
+    font-size: 22px;
+    font-weight: bold;
+    color: #00ffcc;
+    text-shadow: 0 0 20px #00ffcc88, 0 0 40px #00ffcc44;
+    letter-spacing: 3px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    color: #8888bb;
+    margin-top: 4px;
+    letter-spacing: 1px;
+  }
+
+  #hint {
+    position: fixed;
+    bottom: 80px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    text-align: center;
+    font-size: 12px;
+    color: #6666aa;
+    pointer-events: none;
+    letter-spacing: 1px;
+  }
+
+  #hint .shapes {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+
+  #hint .shape-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    color: #9999cc;
+  }
+
+  #hint .shape-icon {
+    font-size: 18px;
+  }
+
+  #status-bar {
+    position: fixed;
+    bottom: 20px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    font-size: 11px;
+    color: #6666aa;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    background: rgba(5,5,20,0.7);
+    padding: 8px 20px;
+    border-radius: 20px;
+    border: 1px solid #222244;
+    backdrop-filter: blur(10px);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #ff4444;
+    display: inline-block;
+    margin-right: 5px;
+    transition: background 0.3s;
+  }
+
+  .status-dot.connected { background: #00ffcc; box-shadow: 0 0 8px #00ffcc; }
+
+  #clear-btn {
+    position: fixed;
+    top: 20px; right: 20px;
+    z-index: 20;
+    background: rgba(255,50,100,0.15);
+    border: 1px solid #ff336644;
+    color: #ff6688;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    pointer-events: all;
+  }
+
+  #clear-btn:hover {
+    background: rgba(255,50,100,0.3);
+    border-color: #ff3366;
+    box-shadow: 0 0 15px #ff336644;
+  }
+
+  #gesture-flash {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 30;
+    font-size: 28px;
+    font-weight: bold;
+    letter-spacing: 4px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    text-shadow: 0 0 30px currentColor;
+  }
+
+  #obj-count {
+    position: fixed;
+    top: 20px; right: 120px;
+    z-index: 20;
+    font-size: 11px;
+    color: #6666aa;
+    background: rgba(5,5,20,0.7);
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid #222244;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas-3d"></canvas>
+<canvas id="draw-canvas"></canvas>
+
+<div id="ui">
+  <div class="title">✦ AIR</div>
+  <div class="subtitle">gesture · 3d · collab</div>
+</div>
+
+<div id="hint">
+  <div class="shapes">
+    <div class="shape-item"><span class="shape-icon">○</span><span>circle → sphere</span></div>
+    <div class="shape-item"><span class="shape-icon">—</span><span>line → bar</span></div>
+    <div class="shape-item"><span class="shape-icon">△</span><span>triangle → cone</span></div>
+    <div class="shape-item"><span class="shape-icon">≋</span><span>wave → spring</span></div>
+    <div class="shape-item"><span class="shape-icon">Z</span><span>Z-shape → lightning</span></div>
+  </div>
+  <div>draw with mouse · hold shift to orbit · click objects to drag</div>
+</div>
+
+<div id="status-bar">
+  <span><span class="status-dot" id="status-dot"></span><span id="status-text">connecting...</span></span>
+  <span id="peer-count">0 peers</span>
+</div>
+
+<div id="obj-count">0 objects</div>
+
+<button id="clear-btn" onclick="clearScene()">✕ CLEAR</button>
+
+<div id="gesture-flash"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ─── Three.js setup ─────────────────────────────────────────────────────
+const canvas3d = document.getElementById('canvas-3d');
+const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050510);
+scene.fog = new THREE.FogExp2(0x050510, 0.02);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(0, 5, 15);
+
+const controls = new OrbitControls(camera, canvas3d);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enabled = false; // only when shift held
+
+// Grid
+const gridHelper = new THREE.GridHelper(60, 40, 0x111133, 0x111133);
+scene.add(gridHelper);
+
+// Ambient + directional lights
+const ambient = new THREE.AmbientLight(0x080820, 2);
+scene.add(ambient);
+
+const dirLight = new THREE.DirectionalLight(0x4444ff, 3);
+dirLight.position.set(5, 10, 5);
+dirLight.castShadow = true;
+scene.add(dirLight);
+
+const pointLight1 = new THREE.PointLight(0x00ffcc, 5, 30);
+pointLight1.position.set(-5, 3, 0);
+scene.add(pointLight1);
+
+const pointLight2 = new THREE.PointLight(0xff44aa, 5, 30);
+pointLight2.position.set(5, 3, 0);
+scene.add(pointLight2);
+
+// Bloom post-processing
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.8, 0.4, 0.1
+);
+composer.addPass(bloomPass);
+
+// ─── Material helpers ────────────────────────────────────────────────────
+const COLORS = [
+  0x00ffcc, 0xff44aa, 0x4488ff, 0xffaa00, 0xaa44ff,
+  0xff6644, 0x44ffaa, 0xff88cc, 0x88aaff
+];
+let colorIdx = 0;
+const nextColor = () => COLORS[colorIdx++ % COLORS.length];
+
+function metalMat(color) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.9,
+    roughness: 0.1,
+    emissive: color,
+    emissiveIntensity: 0.3,
+  });
+}
+
+function glowMat(color) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.3,
+    roughness: 0.4,
+    emissive: color,
+    emissiveIntensity: 0.6,
+    transparent: true,
+    opacity: 0.92,
+  });
+}
+
+// ─── Object creation from gesture type ──────────────────────────────────
+function create3DObject(type, pos, color) {
+  const c = new THREE.Color(color);
+  let mesh;
+
+  if (type === 'circle') {
+    const geo = new THREE.SphereGeometry(0.8, 32, 32);
+    mesh = new THREE.Mesh(geo, metalMat(c));
+    mesh.castShadow = true;
+  }
+  else if (type === 'line') {
+    const geo = new THREE.BoxGeometry(3, 0.25, 0.25);
+    mesh = new THREE.Mesh(geo, metalMat(c));
+    mesh.castShadow = true;
+    mesh.rotation.y = Math.random() * Math.PI;
+  }
+  else if (type === 'triangle') {
+    const geo = new THREE.ConeGeometry(0.7, 1.8, 5);
+    mesh = new THREE.Mesh(geo, glowMat(c));
+    mesh.castShadow = true;
+  }
+  else if (type === 'wave') {
+    // Spring/coil using torus segments
+    const group = new THREE.Group();
+    const turns = 6;
+    for (let i = 0; i < turns * 8; i++) {
+      const t = i / (turns * 8);
+      const angle = t * turns * Math.PI * 2;
+      const r = 0.4;
+      const x = Math.cos(angle) * r;
+      const y = (t - 0.5) * 3.5;
+      const z = Math.sin(angle) * r;
+      const segGeo = new THREE.SphereGeometry(0.07, 6, 6);
+      const segMesh = new THREE.Mesh(segGeo, metalMat(c));
+      segMesh.position.set(x, y, z);
+      group.add(segMesh);
+    }
+    mesh = group;
+  }
+  else if (type === 'z') {
+    // Lightning bolt using particles
+    const group = new THREE.Group();
+    const pts = [];
+    // Z shape points → lightning zig-zag
+    const segments = 20;
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const jitter = (Math.random() - 0.5) * 0.4;
+      let x, y;
+      if (t < 0.33) { x = t * 3; y = 1.5 + jitter; }
+      else if (t < 0.67) { x = (t - 0.33) * -3 + 1; y = 1.5 - (t - 0.33) * 4.5 + jitter; }
+      else { x = (t - 0.67) * 3; y = -1.5 + jitter; }
+      pts.push(new THREE.Vector3(x - 0.5, y, jitter));
+    }
+    // Main bolt
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+    const lineMat = new THREE.LineBasicMaterial({ color: c, linewidth: 2 });
+    group.add(new THREE.Line(lineGeo, lineMat));
+    // Particle glow
+    const partCount = 80;
+    const positions = new Float32Array(partCount * 3);
+    for (let i = 0; i < partCount; i++) {
+      const pt = pts[Math.floor(Math.random() * pts.length)];
+      positions[i * 3] = pt.x + (Math.random() - 0.5) * 0.5;
+      positions[i * 3 + 1] = pt.y + (Math.random() - 0.5) * 0.5;
+      positions[i * 3 + 2] = pt.z + (Math.random() - 0.5) * 0.5;
+    }
+    const pGeo = new THREE.BufferGeometry();
+    pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const pMat = new THREE.PointsMaterial({ color: c, size: 0.12, sizeAttenuation: true, transparent: true, opacity: 0.8 });
+    group.add(new THREE.Points(pGeo, pMat));
+    mesh = group;
+  }
+  else {
+    // fallback sphere
+    const geo = new THREE.SphereGeometry(0.6, 16, 16);
+    mesh = new THREE.Mesh(geo, metalMat(c));
+  }
+
+  mesh.position.set(pos.x, pos.y + 0.5, pos.z);
+  return mesh;
+}
+
+// ─── Scene object management ─────────────────────────────────────────────
+const sceneObjects = new Map(); // id → THREE object
+
+function addObjectToScene(obj) {
+  if (sceneObjects.has(obj.id)) return;
+  const pos = new THREE.Vector3(obj.position.x, obj.position.y, obj.position.z);
+  const mesh = create3DObject(obj.type, pos, new THREE.Color(obj.color));
+  mesh.userData.id = obj.id;
+  mesh.userData.draggable = true;
+  scene.add(mesh);
+  sceneObjects.set(obj.id, mesh);
+  document.getElementById('obj-count').textContent = `${sceneObjects.size} objects`;
+
+  // Spawn animation
+  mesh.scale.set(0, 0, 0);
+  const t0 = performance.now();
+  function grow() {
+    const t = (performance.now() - t0) / 400;
+    if (t < 1) {
+      const s = easeOutBack(t);
+      mesh.scale.set(s, s, s);
+      requestAnimationFrame(grow);
+    } else {
+      mesh.scale.set(1, 1, 1);
+    }
+  }
+  grow();
+}
+
+function easeOutBack(t) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+function clearScene() {
+  sceneObjects.forEach((m) => scene.remove(m));
+  sceneObjects.clear();
+  document.getElementById('obj-count').textContent = '0 objects';
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'clear' }));
+  }
+}
+
+window.clearScene = clearScene;
+
+// ─── Gesture recognition ─────────────────────────────────────────────────
+class GestureRecognizer {
+  constructor() { this.points = []; }
+
+  addPoint(x, y) { this.points.push({ x, y }); }
+
+  recognize() {
+    if (this.points.length < 8) return null;
+    const pts = this.points;
+
+    // Normalize
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    const w = maxX - minX, h = maxY - minY;
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+    // Total path length
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+      len += Math.sqrt(dx*dx + dy*dy);
+    }
+
+    // Start-to-end distance
+    const endDist = Math.hypot(pts[pts.length-1].x - pts[0].x, pts[pts.length-1].y - pts[0].y);
+    const closedness = endDist / Math.max(w, h, 1);
+
+    // Aspect ratio
+    const aspect = w / Math.max(h, 1);
+
+    // Straightness (end-to-end / total path)
+    const straightness = endDist / Math.max(len, 1);
+
+    // Direction changes (for wave/Z detection)
+    const dirChangesY = this._countDirectionChanges('y', pts);
+    const dirChangesX = this._countDirectionChanges('x', pts);
+
+    // Z-shape: 3 main segments with specific direction pattern
+    if (this._isZShape(pts)) return { type: 'z', cx, cy };
+
+    // Circle: closedness < 0.4, aspect ~1
+    if (closedness < 0.45 && Math.max(w, h) > 30 && aspect > 0.5 && aspect < 2.0) {
+      return { type: 'circle', cx, cy };
+    }
+
+    // Straight line: very straight, long
+    if (straightness > 0.85 && Math.max(w, h) > 40) {
+      return { type: 'line', cx, cy };
+    }
+
+    // Wave: multiple Y direction changes
+    if (dirChangesY >= 3 && w > 60 && h < w * 0.7) {
+      return { type: 'wave', cx, cy };
+    }
+
+    // Triangle: 3 corners / low closedness but not circle
+    if (this._isTriangle(pts, w, h)) {
+      return { type: 'triangle', cx, cy };
+    }
+
+    return null;
+  }
+
+  _countDirectionChanges(axis, pts) {
+    let changes = 0;
+    let prevDir = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = pts[i][axis] - pts[i-1][axis];
+      const dir = d > 1 ? 1 : d < -1 ? -1 : 0;
+      if (dir !== 0 && prevDir !== 0 && dir !== prevDir) changes++;
+      if (dir !== 0) prevDir = dir;
+    }
+    return changes;
+  }
+
+  _isZShape(pts) {
+    if (pts.length < 12) return false;
+    const n = pts.length;
+    const third = Math.floor(n / 3);
+
+    const seg1 = pts.slice(0, third);
+    const seg2 = pts.slice(third, third * 2);
+    const seg3 = pts.slice(third * 2);
+
+    const xRange1 = this._xRange(seg1);
+    const xRange2 = this._xRange(seg2);
+    const xRange3 = this._xRange(seg3);
+
+    // Seg1: mostly horizontal (left to right)
+    // Seg2: diagonal (right-top to left-bottom or reverse)
+    // Seg3: mostly horizontal again
+    const s1horiz = xRange1 > 40;
+    const s3horiz = xRange3 > 40;
+    const s2diag = this._isDiagonal(seg2);
+
+    return s1horiz && s3horiz && s2diag;
+  }
+
+  _xRange(pts) {
+    let mn = Infinity, mx = -Infinity;
+    for (const p of pts) { mn = Math.min(mn, p.x); mx = Math.max(mx, p.x); }
+    return mx - mn;
+  }
+
+  _isDiagonal(pts) {
+    if (pts.length < 3) return false;
+    const dx = pts[pts.length-1].x - pts[0].x;
+    const dy = pts[pts.length-1].y - pts[0].y;
+    return Math.abs(dx) > 20 && Math.abs(dy) > 20;
+  }
+
+  _isTriangle(pts, w, h) {
+    // Find corners as local extremes
+    const corners = this._findCorners(pts);
+    if (corners >= 2 && corners <= 4) {
+      const endClose = Math.hypot(pts[pts.length-1].x - pts[0].x, pts[pts.length-1].y - pts[0].y);
+      return endClose < Math.max(w, h) * 0.6 && Math.max(w, h) > 40;
+    }
+    return false;
+  }
+
+  _findCorners(pts) {
+    let corners = 0;
+    const threshold = 25;
+    let prevAngle = null;
+    for (let i = 2; i < pts.length - 2; i++) {
+      const dx1 = pts[i].x - pts[i-2].x, dy1 = pts[i].y - pts[i-2].y;
+      const dx2 = pts[i+2].x - pts[i].x, dy2 = pts[i+2].y - pts[i].y;
+      const a1 = Math.atan2(dy1, dx1), a2 = Math.atan2(dy2, dx2);
+      let diff = Math.abs(a2 - a1);
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      if (diff > 0.7) corners++;
+    }
+    return Math.ceil(corners / 5);
+  }
+
+  reset() { this.points = []; }
+}
+
+// ─── Drawing canvas ──────────────────────────────────────────────────────
+const drawCanvas = document.getElementById('draw-canvas');
+const dctx = drawCanvas.getContext('2d');
+drawCanvas.width = window.innerWidth;
+drawCanvas.height = window.innerHeight;
+
+const recognizer = new GestureRecognizer();
+let isDrawing = false;
+let drawTimeout = null;
+
+const NEON_COLORS_CSS = ['#00ffcc', '#ff44aa', '#4488ff', '#ffaa00', '#aa44ff'];
+let strokeColorIdx = 0;
+let currentStrokeColor = NEON_COLORS_CSS[0];
+
+drawCanvas.addEventListener('mousedown', (e) => {
+  if (e.shiftKey) return; // orbit mode
+  isDrawing = true;
+  recognizer.reset();
+  currentStrokeColor = NEON_COLORS_CSS[strokeColorIdx++ % NEON_COLORS_CSS.length];
+  dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  dctx.beginPath();
+  dctx.moveTo(e.clientX, e.clientY);
+  recognizer.addPoint(e.clientX, e.clientY);
+});
+
+drawCanvas.addEventListener('mousemove', (e) => {
+  if (!isDrawing) return;
+  recognizer.addPoint(e.clientX, e.clientY);
+  dctx.lineTo(e.clientX, e.clientY);
+  dctx.strokeStyle = currentStrokeColor;
+  dctx.lineWidth = 2.5;
+  dctx.lineCap = 'round';
+  dctx.lineJoin = 'round';
+  dctx.shadowColor = currentStrokeColor;
+  dctx.shadowBlur = 12;
+  dctx.stroke();
+  dctx.beginPath();
+  dctx.moveTo(e.clientX, e.clientY);
+});
+
+drawCanvas.addEventListener('mouseup', (e) => {
+  if (!isDrawing) return;
+  isDrawing = false;
+  processGesture();
+});
+
+drawCanvas.addEventListener('mouseleave', (e) => {
+  if (!isDrawing) return;
+  isDrawing = false;
+  processGesture();
+});
+
+// Touch support
+drawCanvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  isDrawing = true;
+  recognizer.reset();
+  currentStrokeColor = NEON_COLORS_CSS[strokeColorIdx++ % NEON_COLORS_CSS.length];
+  dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  dctx.beginPath();
+  dctx.moveTo(t.clientX, t.clientY);
+  recognizer.addPoint(t.clientX, t.clientY);
+}, { passive: false });
+
+drawCanvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!isDrawing) return;
+  const t = e.touches[0];
+  recognizer.addPoint(t.clientX, t.clientY);
+  dctx.lineTo(t.clientX, t.clientY);
+  dctx.strokeStyle = currentStrokeColor;
+  dctx.lineWidth = 2.5;
+  dctx.lineCap = 'round';
+  dctx.lineJoin = 'round';
+  dctx.shadowColor = currentStrokeColor;
+  dctx.shadowBlur = 12;
+  dctx.stroke();
+  dctx.beginPath();
+  dctx.moveTo(t.clientX, t.clientY);
+}, { passive: false });
+
+drawCanvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!isDrawing) return;
+  isDrawing = false;
+  processGesture();
+}, { passive: false });
+
+function processGesture() {
+  const result = recognizer.recognize();
+  setTimeout(() => {
+    dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  }, 400);
+
+  if (!result) return;
+
+  const { type, cx, cy } = result;
+
+  // Convert screen coords to 3D world coords
+  const ndcX = (cx / window.innerWidth) * 2 - 1;
+  const ndcY = -(cy / window.innerHeight) * 2 + 1;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const target = new THREE.Vector3();
+  raycaster.ray.intersectPlane(plane, target);
+
+  const color = nextColor();
+  const colorHex = '#' + color.toString(16).padStart(6, '0');
+  const id = crypto.randomUUID();
+
+  const obj = {
+    id,
+    type,
+    position: { x: target.x, y: 0, z: target.z },
+    color: colorHex,
+    creator: clientId,
+  };
+
+  addObjectToScene(obj);
+  showGestureFlash(type, colorHex);
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'add_object', object: obj }));
+  }
+}
+
+function showGestureFlash(type, color) {
+  const labels = {
+    circle: '◉ SPHERE',
+    line: '▬ BAR',
+    triangle: '▲ CONE',
+    wave: '⌇ SPRING',
+    z: '⚡ LIGHTNING',
+  };
+  const flash = document.getElementById('gesture-flash');
+  flash.textContent = labels[type] || type.toUpperCase();
+  flash.style.color = color;
+  flash.style.opacity = 1;
+  setTimeout(() => { flash.style.opacity = 0; }, 800);
+}
+
+// ─── Drag objects ─────────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+let dragTarget = null;
+let dragOffset = new THREE.Vector3();
+
+function getMouseNDC(e) {
+  return new THREE.Vector2(
+    (e.clientX / window.innerWidth) * 2 - 1,
+    -(e.clientY / window.innerHeight) * 2 + 1
+  );
+}
+
+drawCanvas.addEventListener('click', (e) => {
+  if (e.shiftKey) return;
+  // handled by mouseup for drag
+});
+
+// Shift = orbit mode
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Shift') {
+    controls.enabled = true;
+    drawCanvas.style.pointerEvents = 'none';
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Shift') {
+    controls.enabled = false;
+    drawCanvas.style.pointerEvents = 'all';
+  }
+});
+
+// ─── WebSocket ────────────────────────────────────────────────────────────
+const clientId = Math.random().toString(36).slice(2);
+let ws = null;
+let reconnectTimer = null;
+let peerCount = 0;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('status-dot').classList.add('connected');
+    document.getElementById('status-text').textContent = 'connected';
+    clearTimeout(reconnectTimer);
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'scene_sync') {
+      for (const obj of data.objects) addObjectToScene(obj);
+    } else if (data.type === 'add_object') {
+      addObjectToScene(data.object);
+    } else if (data.type === 'clear') {
+      sceneObjects.forEach((m) => scene.remove(m));
+      sceneObjects.clear();
+      document.getElementById('obj-count').textContent = '0 objects';
+    } else if (data.type === 'update_object') {
+      const mesh = sceneObjects.get(data.id);
+      if (mesh && data.updates.position) {
+        mesh.position.set(data.updates.position.x, data.updates.position.y, data.updates.position.z);
+      }
+    } else if (data.type === 'peer_count') {
+      peerCount = data.count;
+      document.getElementById('peer-count').textContent = `${peerCount} peer${peerCount !== 1 ? 's' : ''}`;
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('status-dot').classList.remove('connected');
+    document.getElementById('status-text').textContent = 'reconnecting...';
+    reconnectTimer = setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+connectWS();
+
+// ─── Animate ──────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Gentle floating for all objects
+  sceneObjects.forEach((mesh) => {
+    if (mesh.userData.draggable) {
+      mesh.rotation.y += 0.003;
+      mesh.position.y = (mesh.userData.baseY || 0) + Math.sin(t * 0.8 + (mesh.userData.id?.charCodeAt(0) || 0)) * 0.1;
+    }
+  });
+
+  // Animate lights
+  pointLight1.position.x = Math.sin(t * 0.5) * 6;
+  pointLight2.position.x = Math.cos(t * 0.5) * 6;
+
+  controls.update();
+  composer.render();
+}
+
+// Store base Y for floating
+const origAdd = addObjectToScene;
+// Patch to track baseY
+const _origAddObjectToScene = addObjectToScene;
+function patchedAdd(obj) {
+  _origAddObjectToScene(obj);
+  const mesh = sceneObjects.get(obj.id);
+  if (mesh) mesh.userData.baseY = mesh.position.y;
+}
+// We directly inline baseY tracking in create3DObject already via position.y
+
+animate();
+
+// ─── Resize ───────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  drawCanvas.width = window.innerWidth;
+  drawCanvas.height = window.innerHeight;
+});
+
+</script>
+</body>
+</html>
