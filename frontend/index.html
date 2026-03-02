@@ -449,52 +449,84 @@ function centroid3D(pts) {
   return c;
 }
 
+// Bounding box of 3D points
+function bbox3D(pts) {
+  const min = pts[0].clone(), max = pts[0].clone();
+  pts.forEach(p => { min.min(p); max.max(p); });
+  return { min, max, size: max.clone().sub(min) };
+}
+
 function spawnObject(type, center, points3D) {
   const c = randCandy();
   const material = new THREE.MeshStandardMaterial({
     color: c.color,
     emissive: c.emissive,
-    emissiveIntensity: 0.6,
-    metalness: 0.15,
-    roughness: 0.3,
+    emissiveIntensity: 0.55,
+    metalness: 0.2,
+    roughness: 0.28,
   });
 
-  // ── Tube radius: thick = "實心" look ────────────────────────────
-  const tubeRadius = { circle: 0.10, line: 0.09, wave: 0.08, box: 0.085, tube: 0.085 }[type] || 0.085;
-  const tubeSeg    = { circle: 80, line: 8, wave: 60, box: 40, tube: 60 }[type] || 60;
-  const isClosed   = type === 'circle';
-
-  // ── Subsample drawn path ────────────────────────────────────────
-  const step = Math.max(1, Math.floor(points3D.length / 40));
-  let sampled = points3D.filter((_, i) => i % step === 0);
-  if (isClosed) sampled.push(sampled[0].clone());
-  const clean = simplifyPts(sampled);
-
   let geometry;
-  let meshCenter;  // world position the mesh should sit at
+  let meshCenter = centroid3D(points3D.length ? points3D : [center]);
 
-  if (clean && clean.length >= 2) {
-    // ── KEY FIX: translate all points to origin, store centroid ──
-    meshCenter = centroid3D(clean);
-    const localPts = clean.map(p => p.clone().sub(meshCenter));
-    try {
-      const curve = new THREE.CatmullRomCurve3(localPts, isClosed, 'catmullrom', 0.5);
-      geometry = new THREE.TubeGeometry(curve, tubeSeg, tubeRadius, 16, isClosed);
-    } catch (e) {
-      geometry = new THREE.SphereGeometry(0.25, 24, 24);
-      meshCenter = center;
-    }
+  if (type === 'circle') {
+    // ── 實心球：大小由畫的圓決定 ────────────────────────────────
+    const bb = bbox3D(points3D);
+    const r = Math.max(0.15, Math.min(Math.max(bb.size.x, bb.size.y) / 2, 1.5));
+    geometry = new THREE.SphereGeometry(r, 40, 40);
+
+  } else if (type === 'line') {
+    // ── 實心膠囊：長度由畫的線決定 ──────────────────────────────
+    const start3 = points3D[0];
+    const end3   = points3D[points3D.length - 1];
+    const len    = Math.max(0.3, Math.min(start3.distanceTo(end3), 3.0));
+    geometry = new THREE.CapsuleGeometry(0.09, len, 10, 20);
+    // Orient capsule along the drawn direction
+    const dir = end3.clone().sub(start3).normalize();
+    const mesh0 = new THREE.Mesh(geometry, material);
+    mesh0.position.copy(meshCenter);
+    mesh0.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    mesh0.castShadow = true;
+    mesh0.userData.spin = true;
+    mesh0.scale.setScalar(0);
+    scene.add(mesh0);
+    animateIn(mesh0);
+    return mesh0;   // early return (orientation already handled)
+
+  } else if (type === 'box') {
+    // ── 實心方塊：由畫的 bounding box 決定大小 ──────────────────
+    const bb = bbox3D(points3D);
+    const sx = Math.max(0.2, Math.min(bb.size.x, 2.0));
+    const sy = Math.max(0.2, Math.min(bb.size.y, 2.0));
+    const sz = Math.max(0.2, (sx + sy) / 4); // 厚度
+    geometry = new THREE.BoxGeometry(sx, sy, sz);
+
   } else {
-    geometry = new THREE.SphereGeometry(0.25, 24, 24);
-    meshCenter = center;
+    // ── 任意形狀：極厚 Tube（Play-Doh 蛇，看起來完全實心）──────
+    const step = Math.max(1, Math.floor(points3D.length / 35));
+    let sampled = points3D.filter((_, i) => i % step === 0);
+    const clean = simplifyPts(sampled);
+
+    if (clean && clean.length >= 2) {
+      // 置中到原點
+      meshCenter = centroid3D(clean);
+      const localPts = clean.map(p => p.clone().sub(meshCenter));
+      try {
+        const curve = new THREE.CatmullRomCurve3(localPts, false, 'catmullrom', 0.5);
+        geometry = new THREE.TubeGeometry(curve, 60, 0.18, 20, false);
+      } catch(e) {
+        geometry = new THREE.SphereGeometry(0.3, 28, 28);
+      }
+    } else {
+      geometry = new THREE.SphereGeometry(0.3, 28, 28);
+    }
   }
 
+  // ── 球/方塊/tube：幾何體已在原點，mesh 移到畫的位置 ──────────
   const mesh = new THREE.Mesh(geometry, material);
-  // Position at centroid — so rotation is around shape's own center
   mesh.position.copy(meshCenter);
   mesh.castShadow = true;
-  mesh.userData.spin = true;   // ✅ now safe: geometry centered at origin
-
+  mesh.userData.spin = true;
   mesh.scale.setScalar(0);
   scene.add(mesh);
   animateIn(mesh);
