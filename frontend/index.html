@@ -134,7 +134,7 @@
   <div class="gestures">
     <div class="g-card"><span class="emoji">☝️</span>伸食指<br>空中畫線</div>
     <div class="g-card"><span class="emoji">🤏</span>捏合手勢<br>完成形狀</div>
-    <div class="g-card"><span class="emoji">✊</span>握拳<br>清除場景</div>
+    <div class="g-card"><span class="emoji">✌️</span>剪刀手<br>清除場景</div>
   </div>
   <p style="font-size:0.8rem;color:#666;">需要相機授權 · 支援多人協作</p>
   <button id="start-btn">🎥 開啟相機並開始</button>
@@ -326,12 +326,14 @@ function isPinchGesture(lm) {
   return dist(lm[4], lm[8]) < 0.055;
 }
 
-function isFistGesture(lm) {
-  // All fingertips below their MCPs (palm face)
-  const palmY = lm[0].y;
-  const tipIds = [8, 12, 16, 20];
-  const mcpIds = [5, 9, 13, 17];
-  return tipIds.every((tip, i) => lm[tip].y > lm[mcpIds[i]].y);
+function isClearGesture(lm) {
+  // ✌️ Peace / Scissors: index + middle both straight, ring + pinky bent, not pinching
+  const indexStraight = lm[8].y < lm[6].y;
+  const middleStraight = lm[12].y < lm[10].y;
+  const ringBent   = lm[16].y > lm[14].y;
+  const pinkyBent  = lm[20].y > lm[18].y;
+  const notPinch   = dist(lm[4], lm[8]) > 0.07;
+  return indexStraight && middleStraight && ringBent && pinkyBent && notPinch;
 }
 
 // ─── Shape recognition ────────────────────────────────────────────────────
@@ -430,14 +432,21 @@ const CANDY = [
 ];
 function randCandy() { return CANDY[Math.floor(Math.random() * CANDY.length)]; }
 
-// Simplify & deduplicate points (remove too-close neighbours)
+// Simplify & deduplicate points
 function simplifyPts(pts, minDist = 0.04) {
   const out = [pts[0]];
   for (let i = 1; i < pts.length; i++) {
     if (out[out.length-1].distanceTo(pts[i]) >= minDist) out.push(pts[i]);
   }
-  // need ≥ 2 distinct points
   return out.length >= 2 ? out : null;
+}
+
+// Compute centroid of 3D points
+function centroid3D(pts) {
+  const c = new THREE.Vector3();
+  pts.forEach(p => c.add(p));
+  c.divideScalar(pts.length);
+  return c;
 }
 
 function spawnObject(type, center, points3D) {
@@ -445,42 +454,46 @@ function spawnObject(type, center, points3D) {
   const material = new THREE.MeshStandardMaterial({
     color: c.color,
     emissive: c.emissive,
-    emissiveIntensity: 0.5,
-    metalness: 0.2,
-    roughness: 0.35,
+    emissiveIntensity: 0.6,
+    metalness: 0.15,
+    roughness: 0.3,
   });
 
-  // ── Tube radius & segments by type ─────────────────────────────
-  const tubeRadius = { circle: 0.07, line: 0.06, wave: 0.05, box: 0.055, tube: 0.055 }[type] || 0.055;
-  const tubeSeg    = { circle: 80, line: 4, wave: 60, box: 40, tube: 60 }[type] || 60;
+  // ── Tube radius: thick = "實心" look ────────────────────────────
+  const tubeRadius = { circle: 0.10, line: 0.09, wave: 0.08, box: 0.085, tube: 0.085 }[type] || 0.085;
+  const tubeSeg    = { circle: 80, line: 8, wave: 60, box: 40, tube: 60 }[type] || 60;
   const isClosed   = type === 'circle';
 
-  // ── Build CatmullRom curve from actual drawn path ───────────────
-  // Subsample to ~40 pts for smoothness
+  // ── Subsample drawn path ────────────────────────────────────────
   const step = Math.max(1, Math.floor(points3D.length / 40));
   let sampled = points3D.filter((_, i) => i % step === 0);
-  // For circle: close the curve
   if (isClosed) sampled.push(sampled[0].clone());
-
   const clean = simplifyPts(sampled);
+
   let geometry;
+  let meshCenter;  // world position the mesh should sit at
 
   if (clean && clean.length >= 2) {
+    // ── KEY FIX: translate all points to origin, store centroid ──
+    meshCenter = centroid3D(clean);
+    const localPts = clean.map(p => p.clone().sub(meshCenter));
     try {
-      const curve = new THREE.CatmullRomCurve3(clean, isClosed, 'catmullrom', 0.5);
-      geometry = new THREE.TubeGeometry(curve, tubeSeg, tubeRadius, 12, isClosed);
+      const curve = new THREE.CatmullRomCurve3(localPts, isClosed, 'catmullrom', 0.5);
+      geometry = new THREE.TubeGeometry(curve, tubeSeg, tubeRadius, 16, isClosed);
     } catch (e) {
-      geometry = new THREE.SphereGeometry(0.2, 20, 20);
+      geometry = new THREE.SphereGeometry(0.25, 24, 24);
+      meshCenter = center;
     }
   } else {
-    geometry = new THREE.SphereGeometry(0.2, 20, 20);
+    geometry = new THREE.SphereGeometry(0.25, 24, 24);
+    meshCenter = center;
   }
 
   const mesh = new THREE.Mesh(geometry, material);
-  // Tube is already positioned in world space — no extra position offset
+  // Position at centroid — so rotation is around shape's own center
+  mesh.position.copy(meshCenter);
   mesh.castShadow = true;
-  // Slow idle rotation for circle & box
-  mesh.userData.spin = false; // tube geometry lives in world space; no rotation
+  mesh.userData.spin = true;   // ✅ now safe: geometry centered at origin
 
   mesh.scale.setScalar(0);
   scene.add(mesh);
@@ -655,13 +668,13 @@ function onHandResults(results) {
 
   const drawing = isDrawingGesture(lm);
   const pinch   = isPinchGesture(lm);
-  const fist    = isFistGesture(lm);
+  const clear   = isClearGesture(lm);
 
-  if (fist && !fistCooldown) {
+  if (clear && !fistCooldown) {
     fistCooldown = true;
     trail = [];
     clearScene();
-    lastGesture = 'fist';
+    lastGesture = 'clear';
     setTimeout(() => { fistCooldown = false; }, 1500);
     return;
   }
